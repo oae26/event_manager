@@ -38,16 +38,13 @@ def test_verify_password_invalid_hash():
 
 @pytest.mark.parametrize("password", [
     "",              # Empty password
-    " ",             # Single whitespace
-    "a"*100,         # Long password
-    "!@#$%^&*()_+",  # Special characters
-    "1234567890"     # Numeric password
+    "short",         # Too short
+    "a" * 65         # Too long
 ])
-def test_hash_password_edge_cases(password):
-    """Test hashing various edge case passwords."""
-    hashed = hash_password(password)
-    assert isinstance(hashed, str), f"Hash for '{password}' should be a string"
-    assert hashed.startswith('$2b$'), "Hash should start with bcrypt prefix '$2b$'"
+def test_hash_password_invalid_length(password):
+    """Test that hashing passwords with invalid lengths raises an error."""
+    with pytest.raises(ValueError, match="Password must be at least|must not exceed"):
+        hash_password(password)
 
 @pytest.mark.parametrize("password", [
     " ",             # Single whitespace
@@ -62,20 +59,25 @@ def test_verify_password_edge_cases(password):
 
 def test_hash_password_internal_error(monkeypatch):
     """Test proper error handling when an internal bcrypt error occurs."""
-    def mock_bcrypt_gensalt(rounds):
+    def mock_gensalt(rounds):
         raise RuntimeError("Simulated internal error")
 
-    monkeypatch.setattr("bcrypt", "gensalt", mock_bcrypt_gensalt)
-    with pytest.raises(ValueError, match="Error generating bcrypt salt"):
+    # Correctly patch bcrypt.gensalt
+    monkeypatch.setattr("app.utils.security.bcrypt.gensalt", mock_gensalt)
+    
+    with pytest.raises(ValueError, match="Failed to hash password"):
         hash_password("test_password")
 
-def test_hash_password_and_verify_consistency():
-    """Ensure hashed passwords can be verified consistently."""
-    password = "secure_password"
-    hashed = hash_password(password)
-    assert verify_password(password, hashed), "Password should match its hash"
-    assert not verify_password("wrong_password", hashed), "Wrong password should not match the hash"
-
+@pytest.mark.parametrize("password, hash_value", [
+    ("password", None),
+    ("password", 12345),
+    ("password", ""),
+    ("password", {}),
+])
+def test_verify_password_invalid_inputs(password, hash_value):
+    """Test that invalid inputs for password verification raise errors."""
+    with pytest.raises(ValueError, match="Invalid bcrypt hash format"):
+        verify_password(password, hash_value)
 @pytest.mark.parametrize("invalid_input", [
     None,
     12345,
@@ -85,7 +87,7 @@ def test_hash_password_and_verify_consistency():
 ])
 def test_hash_password_invalid_input(invalid_input):
     """Test that invalid inputs for password hashing raise errors."""
-    with pytest.raises(TypeError, match="Password must be a string"):
+    with pytest.raises(ValueError, match="Password must be a string"):
         hash_password(invalid_input)
 
 @pytest.mark.parametrize("password, hash_value", [
@@ -98,3 +100,10 @@ def test_verify_password_invalid_inputs(password, hash_value):
     """Test that invalid inputs for password verification raise errors."""
     with pytest.raises(ValueError, match="Invalid bcrypt hash format"):
         verify_password(password, hash_value)
+
+def test_hash_password_and_verify_consistency():
+    """Ensure hashed passwords can be verified consistently."""
+    password = "secure_password"
+    hashed = hash_password(password)
+    assert verify_password(password, hashed), "Password should match its hash"
+    assert not verify_password("wrong_password", hashed), "Wrong password should not match the hash"
